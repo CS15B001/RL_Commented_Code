@@ -50,7 +50,7 @@ class Experience(object):
         :return: distributions, dict
         """
         res = {}
-        # This is usually equal to k, the batch size
+        # This is usually equal to k, the batch size ------  Not true, check the use of this
         n_partitions = self.partition_num
         partition_num = 1
         # each part size
@@ -61,7 +61,7 @@ class Experience(object):
         # last line. We divide the whole range into 'k' segments
         # This has the advantage that the same transition will not be
         # picked twice in the same batch (Stratified Sampling)
-        for n in range(partition_size, self.size + 1, partition_size):
+        for n in range(int(partition_size), self.size + 1, int(partition_size)):
             if self.learn_start <= n <= self.priority_size:
                 distribution = {}
                 # P(i) = (rank i) ^ (-alpha) / sum ((rank i) ^ (-alpha))
@@ -73,6 +73,9 @@ class Experience(object):
                 # split to k segment, and than uniform sample in each k
                 # set k = batch_size, each segment has total probability is 1 / batch_size
                 # strata_ends keep each segment start pos and end pos
+
+                # The following code creates strata_ends such that 
+                # strata_ends[i]-strata_ends[0] = (i-1)*1/batch_size probability
                 cdf = np.cumsum(distribution['pdf'])
                 strata_ends = {1: 0, self.batch_size + 1: n}
                 step = 1 / self.batch_size
@@ -97,10 +100,7 @@ class Experience(object):
         :return: index, int
         """
         if self.record_size <= self.size:
-            # self.record_size is increasing. It thus represents the number of
-            # elements inserted over the whole run and not just the number of 
-            # elements in the heap currently. If the heap size is 3 and 3 elements
-            # have been replaced, self.record_size = 6
+            # self.record_size increases till self.size and stays there after that
             self.record_size += 1
         
         # self.index is being monotonically increased and thus say self.size = 3
@@ -131,6 +131,9 @@ class Experience(object):
         :param experience: maybe a tuple, or list
         :return: bool, indicate insert status
         """
+
+        # This function should ideally be called only if a new experience needs to 
+        # be stored because it is given the highest priority
 
         # Get the next position to be inserted in
         insert_index = self.fix_index()
@@ -203,10 +206,17 @@ class Experience(object):
             # Store a minimum of self.learn_start number of experiences before starting
             # any kind of learning. This is done to ensure there is not learning happening
             # with very small number of examples, leading to unstable estimates
-            # Recollect: self.record_size is monotonically increasing
+            # Recollect: self.record_size increases till it reaches self.size and then stops there
             sys.stderr.write('Record size less than learn start! Sample failed\n')
             return False, False, False
 
+        # If the replay buffer is not full, find the right partition to use
+        # If only half the buffer is full, partition number 'self.partition_num/2'
+        # is used because there are only those many ranks assigned
+
+        # dist_index will always be the last partition after the replay
+        # buffer is full. If it is not full, it will represent some
+        # partition number less than that
         dist_index = math.floor(self.record_size / self.size * self.partition_num)
         # issue 1 by @camigord
         partition_size = math.floor(self.size / self.partition_num)
@@ -214,16 +224,22 @@ class Experience(object):
         distribution = self.distributions[dist_index]
         rank_list = []
         # sample from k segments
+
+        # This is stratified sampling. Each segment represents a probability
+        # of 1/self.batch_size and we sample once from each segment
+        # index represents which rank to choose, (1,n)
         for n in range(1, self.batch_size + 1):
             index = random.randint(distribution['strata_ends'][n] + 1,
                                    distribution['strata_ends'][n + 1])
             rank_list.append(index)
 
-        # beta, increase by global_step, max 1
+        # beta, increase by global_step (the current training step), max 1
+        # This is linear annealing mentioned in section 3.4
         beta = min(self.beta_zero + (global_step - self.learn_start - 1) * self.beta_grad, 1)
         # find all alpha pow, notice that pdf is a list, start from 0
         alpha_pow = [distribution['pdf'][v - 1] for v in rank_list]
         # w = (N * P(i)) ^ (-beta) / max w
+        # This equation is metioned in equation 3.4
         w = np.power(np.array(alpha_pow) * partition_max, -beta)
         w_max = max(w)
         w = np.divide(w, w_max)
