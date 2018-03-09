@@ -56,6 +56,8 @@ class DDPG(object):
 
         self.create_actor_critic = import_function(self.network_class)
 
+        # The function dims_to_shapes is called so because, it takes in an integer
+        # and makes it a tuple, the standard representation for shapes in numpy
         input_shapes = dims_to_shapes(self.input_dims)
         self.dimo = self.input_dims['o']
         self.dimg = self.input_dims['g']
@@ -66,6 +68,7 @@ class DDPG(object):
         for key in sorted(self.input_dims.keys()):
             if key.startswith('info_'):
                 continue
+            # The * (starred expression) is used to unpack a list
             stage_shapes[key] = (None, *input_shapes[key])
         for key in ['o', 'g']:
             stage_shapes[key + '_2'] = stage_shapes[key]

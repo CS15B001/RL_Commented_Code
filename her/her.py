@@ -12,7 +12,6 @@ def make_sample_her_transitions(replay_strategy, replay_k, reward_fun):
         reward_fun (function): function to re-compute the reward with substituted goals
     """
     if replay_strategy == 'future':
-        # future_p is the probability of choosing to perform 'future' HER as against just ER
         future_p = 1 - (1. / (1 + replay_k))
     else:  # 'replay_strategy' == 'none'
         future_p = 0
@@ -20,33 +19,21 @@ def make_sample_her_transitions(replay_strategy, replay_k, reward_fun):
     def _sample_her_transitions(episode_batch, batch_size_in_transitions):
         """episode_batch is {key: array(buffer_size x T x dim_key)}
         """
-
-        # T refers to the number of timesteps the episode was played for
         T = episode_batch['u'].shape[1]
-        # rollout_batch_size is the number of episodes in the batch
         rollout_batch_size = episode_batch['u'].shape[0]
         batch_size = batch_size_in_transitions
 
-        # Select which episodes and time steps to use. - OpenAI
-
-        # 'batch_size' number of elements, episode_batch[key][episode_idxs[i], t_samples[i]]
-        # are sampled
+        # Select which episodes and time steps to use.
         episode_idxs = np.random.randint(0, rollout_batch_size, batch_size)
         t_samples = np.random.randint(T, size=batch_size)
-        # transitions[key] is now an array of samples
         transitions = {key: episode_batch[key][episode_idxs, t_samples].copy()
                        for key in episode_batch.keys()}
 
         # Select future time indexes proportional with probability future_p. These
         # will be used for HER replay by substituting in future goals.
-
-        # future_p fraction of samples will be True and hence those many will be used for HER replay
-        # np.where returns indices where the condition is true
         her_indexes = np.where(np.random.uniform(size=batch_size) < future_p)
         future_offset = np.random.uniform(size=batch_size) * (T - t_samples)
         future_offset = future_offset.astype(int)
-        # (t_samples + 1 + future_offset) will vary from t_samples to T
-        # This statement randomly selects a future goal, wrt current time-step t_samples
         future_t = (t_samples + 1 + future_offset)[her_indexes]
 
         # Replace goal with achieved goal but only for the previously-selected
